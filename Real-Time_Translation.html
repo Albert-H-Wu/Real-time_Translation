@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <title>即時語音轉錄與翻譯</title>
+    <script src="https://cdn.jsdelivr.net/npm/microsoft-cognitiveservices-speech-sdk@1.20.0/distrib/browser/microsoft.cognitiveservices.speech.sdk.bundle.js"></script>
+    <style>
+        .button-group {
+            display: flex;
+            align-items: center;
+            gap: 1em; /* 控制按钮之间的距离 */
+        }
+        .status {
+            font-weight: bold;
+            margin-left: 1em; /* 状态栏距离按钮组 */
+        }
+        .copyright {
+            font-size: 0.8em;
+            color: lightgray;
+            margin-top: 0.5em;
+        }
+    </style>
+</head>
+<body>
+    <h2>即時語音轉錄與翻譯</div>
+    <div class="copyright">AlbertWu@版權所有，未經授權不得使用。</h1>
+</div>
+    <div class="button-group">
+        <button onclick="requestAuthorization()">開始語音轉錄</button>
+        <button onclick="stopRecognition()">停止語音轉錄</button>
+        <span class="status" id="status">狀態: 未開始</span>
+    </div>
+    <div id="dialogue-container" style="white-space: pre-wrap; margin-top: 1em;"></div>
+
+    <script>
+        const subscriptionKey = "1db722324ce2441092530e595f48c5a1";
+        const serviceRegion = "southeastasia";
+        const requiredAuthCode = "sgs"; 
+        
+        let dialogues = [];  // 存储完整历史段落
+        let currentDialogue = "";  // 正在更新的当前句子
+        let currentTranslation = ""; // 正在更新的翻譯句子
+        let lastRecognizedText = "";  // 上一次实时更新的文本
+        let recognizer = null;  // 识别器对象
+        let inactivityTimer = null;  // 不活动计时器
+
+        function updateDisplay() {
+            const dialogueContainer = document.getElementById("dialogue-container");
+            dialogueContainer.innerText = dialogues.join("\n\n") + "\n\n" +
+                (currentDialogue ? `轉錄中: ${currentDialogue}\n翻譯中: ${currentTranslation}` : "");
+        }
+
+        function updateStatus(message) {
+            document.getElementById("status").innerText = `狀態: ${message}`;
+        }
+
+        function requestAuthorization() {
+            const userAuthCode = prompt("請輸入授權碼以開始語音轉錄：");
+            if (userAuthCode === requiredAuthCode) {
+                startRecognition();
+            } else {
+                alert("授權碼錯誤，無法開始轉錄。");
+                updateStatus("授權失敗");
+            }
+        }
+
+        function startRecognition() {
+            if (!subscriptionKey || !serviceRegion) {
+                alert("請提供有效的 API 金鑰和區域。");
+                return;
+            }
+
+            updateStatus("開始轉錄");
+            
+            try {
+                const speechConfig = SpeechSDK.SpeechTranslationConfig.fromSubscription(subscriptionKey, serviceRegion);
+                speechConfig.speechRecognitionLanguage = "en-US";
+                speechConfig.addTargetLanguage("zh-Hant");
+
+                const audioConfig = SpeechSDK.AudioConfig.fromDefaultMicrophoneInput();
+                recognizer = new SpeechSDK.TranslationRecognizer(speechConfig, audioConfig);
+
+                recognizer.recognizing = (s, e) => {
+                    const recognizedText = e.result.text;
+                    const translatedText = e.result.translations.get("zh-Hant");
+
+                    if (recognizedText !== lastRecognizedText) {
+                        currentDialogue = recognizedText;
+                        currentTranslation = translatedText;
+                        lastRecognizedText = recognizedText;
+                        updateDisplay();
+
+                        // 重置不活动计时器
+                        resetInactivityTimer();
+                        
+                        if (recognizedText.endsWith(".") || recognizedText.endsWith("?") ||
+                            translatedText.endsWith("。") || translatedText.endsWith("？")) {
+                            
+                            const fullSentence = `原文: ${recognizedText}\n翻譯: ${translatedText}`;
+                            dialogues.push(fullSentence);
+                            currentDialogue = "";
+                            currentTranslation = "";
+                            lastRecognizedText = "";
+                            updateDisplay();
+                        }
+                    }
+                };
+
+                recognizer.recognized = (s, e) => {
+                    if (e.result.reason === SpeechSDK.ResultReason.TranslatedSpeech) {
+                        const fullSentence = `原文: ${e.result.text}\n翻譯: ${e.result.translations.get("zh-Hant")}`;
+                        dialogues.push(fullSentence);
+                        currentDialogue = "";
+                        currentTranslation = "";
+                        lastRecognizedText = "";
+                        updateDisplay();
+                    }
+                };
+
+                recognizer.canceled = (s, e) => {
+                    console.error(`Canceled: Reason=${e.reason} ErrorDetails=${e.errorDetails}`);
+                    alert(`語音轉錄取消，原因：${e.errorDetails}`);
+                    stopRecognition();
+                };
+
+                recognizer.sessionStopped = (s, e) => {
+                    console.log("Session stopped.");
+                    stopRecognition();
+                };
+
+                recognizer.startContinuousRecognitionAsync(
+                    () => console.log("Recognition started"),
+                    err => console.error("Error starting recognition:", err)
+                );
+
+                // 启动不活动计时器
+                resetInactivityTimer();
+
+            } catch (error) {
+                console.error("Error initializing recognition:", error);
+            }
+        }
+
+        function stopRecognition() {
+            if (recognizer) {
+                recognizer.stopContinuousRecognitionAsync(
+                    () => console.log("Recognition stopped"),
+                    err => console.error("Error stopping recognition:", err)
+                );
+                recognizer = null;
+            }
+
+            updateStatus("停止轉錄");
+            clearInactivityTimer(); // 停止不活动计时器
+        }
+
+        function resetInactivityTimer() {
+            clearInactivityTimer();
+            inactivityTimer = setTimeout(() => {
+                alert("超過2分鐘無語音檢測，停止轉錄。");
+                stopRecognition();
+            }, 2 * 60 * 1000); // 2分鐘
+        }
+
+        function clearInactivityTimer() {
+            if (inactivityTimer) {
+                clearTimeout(inactivityTimer);
+                inactivityTimer = null;
+            }
+        }
+    </script>
+</body>
+</html>
