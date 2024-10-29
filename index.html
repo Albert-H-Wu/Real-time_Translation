@@ -3,18 +3,26 @@
 <head>
     <meta charset="UTF-8">
     <title>即時語音轉錄與翻譯</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1"> <!-- 添加视口设置，适应移动设备宽度 -->
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <script src="https://cdn.jsdelivr.net/npm/microsoft-cognitiveservices-speech-sdk@1.20.0/distrib/browser/microsoft.cognitiveservices.speech.sdk.bundle.js"></script>
     <style>
+        html, body {
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            font-family: Arial, sans-serif;
+        }
         .button-group {
             display: flex;
             align-items: center;
-            gap: 1em; /* 控制按钮之间的距离 */
-            flex-wrap: wrap; /* 在较小屏幕上换行 */
+            gap: 1em;
+            flex-wrap: wrap;
         }
         .status {
             font-weight: bold;
-            margin-left: 1em; /* 状态栏距离按钮组 */
+            margin-left: 1em;
         }
         .copyright {
             font-size: 0.8em;
@@ -23,18 +31,19 @@
         }
         #dialogue-container {
             white-space: pre-wrap;
-            margin-top: 1em;
-            max-height: 400px; /* 设置最大高度 */
-            overflow-y: scroll; /* 显示垂直滚动条 */
+            flex-grow: 1; /* 占满屏幕剩余空间 */
+            overflow-y: auto;
+            padding: 10px;
+            box-sizing: border-box;
         }
-        /* 响应式样式：当宽度小于600px时，调整布局 */
+        /* 响应式样式 */
         @media (max-width: 600px) {
             .button-group {
-                flex-direction: column; /* 在小屏幕上垂直排列按钮 */
+                flex-direction: column;
                 gap: 0.5em;
             }
             .status {
-                margin-left: 0; /* 移除小屏幕下的间距 */
+                margin-left: 0;
                 font-size: 0.9em;
             }
             h2 {
@@ -60,20 +69,42 @@
         const subscriptionKey = "1db722324ce2441092530e595f48c5a1";
         const serviceRegion = "southeastasia";
         const requiredAuthCode = "sgs"; 
-        
-        let dialogues = [];  // 存储完整历史段落
-        let currentDialogue = "";  // 正在更新的当前句子
-        let currentTranslation = ""; // 正在更新的翻譯句子
-        let lastRecognizedText = "";  // 上一次实时更新的文本
-        let recognizer = null;  // 识别器对象
-        let inactivityTimer = null;  // 不活动计时器
+
+        let dialogues = []; 
+        let currentDialogue = "";  
+        let currentTranslation = ""; 
+        let lastRecognizedText = "";  
+        let recognizer = null;  
+        let inactivityTimer = null;  
+        let wakeLock = null; 
+
+        async function requestWakeLock() {
+            try {
+                if ('wakeLock' in navigator) {
+                    wakeLock = await navigator.wakeLock.request('screen');
+                    console.log("Screen Wake Lock acquired");
+                    wakeLock.addEventListener('release', () => {
+                        console.log('Screen Wake Lock released');
+                    });
+                }
+            } catch (err) {
+                console.error(`Wake Lock error: ${err.name}, ${err.message}`);
+            }
+        }
+
+        function releaseWakeLock() {
+            if (wakeLock) {
+                wakeLock.release().then(() => {
+                    wakeLock = null;
+                    console.log("Screen Wake Lock released");
+                });
+            }
+        }
 
         function updateDisplay() {
             const dialogueContainer = document.getElementById("dialogue-container");
             dialogueContainer.innerText = dialogues.join("\n\n") + "\n\n" +
                 (currentDialogue ? `轉錄中: ${currentDialogue}\n翻譯中: ${currentTranslation}` : "");
-            
-            // 自动滚动到内容底部
             dialogueContainer.scrollTop = dialogueContainer.scrollHeight;
         }
 
@@ -98,14 +129,14 @@
             }
 
             updateStatus("開始轉錄");
-            
-            // 检测是否为移动设备，并锁定屏幕方向
+
             if (/Mobi|Android/i.test(navigator.userAgent)) {
                 if (screen.orientation && screen.orientation.lock) {
                     screen.orientation.lock('portrait').catch(err => console.error("屏幕锁定失败:", err));
                 }
+                requestWakeLock(); // 请求屏幕保持唤醒
             }
-            
+
             try {
                 const speechConfig = SpeechSDK.SpeechTranslationConfig.fromSubscription(subscriptionKey, serviceRegion);
                 speechConfig.speechRecognitionLanguage = "en-US";
@@ -123,8 +154,6 @@
                         currentTranslation = translatedText;
                         lastRecognizedText = recognizedText;
                         updateDisplay();
-
-                        // 重置不活动计时器
                         resetInactivityTimer();
                         
                         if (recognizedText.endsWith(".") || recognizedText.endsWith("?") ||
@@ -167,7 +196,6 @@
                     err => console.error("Error starting recognition:", err)
                 );
 
-                // 启动不活动计时器
                 resetInactivityTimer();
 
             } catch (error) {
@@ -183,9 +211,9 @@
                 );
                 recognizer = null;
             }
-
             updateStatus("停止轉錄");
-            clearInactivityTimer(); // 停止不活动计时器
+            clearInactivityTimer();
+            releaseWakeLock(); // 释放屏幕保持唤醒
         }
 
         function resetInactivityTimer() {
@@ -193,7 +221,7 @@
             inactivityTimer = setTimeout(() => {
                 alert("超過2分鐘無語音檢測，停止轉錄。");
                 stopRecognition();
-            }, 2 * 60 * 1000); // 2分鐘
+            }, 2 * 60 * 1000);
         }
 
         function clearInactivityTimer() {
