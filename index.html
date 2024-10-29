@@ -103,8 +103,12 @@
 
         function updateDisplay() {
             const dialogueContainer = document.getElementById("dialogue-container");
-            dialogueContainer.innerText = dialogues.join("\n\n") + "\n\n" +
-                (currentDialogue ? `轉錄中: ${currentDialogue}\n翻譯中: ${currentTranslation}` : "");
+            dialogueContainer.innerHTML = dialogues.map(dialogue => {
+                // 分离原文和翻译，并应用样式
+                const [originalText, translatedText] = dialogue.split("\n翻譯: ");
+                return `${originalText}<br><span style="color: orange; font-weight: bold;">翻譯: ${translatedText}</span>`;
+            }).join("<br><br>") + "<br><br>" +
+                (currentDialogue ? `轉錄中: ${currentDialogue}<br><span style="color: orange; font-weight: bold;">翻譯中: ${currentTranslation}</span>` : "");
             dialogueContainer.scrollTop = dialogueContainer.scrollHeight;
         }
 
