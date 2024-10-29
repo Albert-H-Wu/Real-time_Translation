@@ -2,6 +2,7 @@
 <html lang="zh-Hant">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"> <!-- 适配移动设备 -->
     <title>即時語音轉錄與翻譯</title>
     <script src="https://cdn.jsdelivr.net/npm/microsoft-cognitiveservices-speech-sdk@1.20.0/distrib/browser/microsoft.cognitiveservices.speech.sdk.bundle.js"></script>
     <style>
@@ -9,22 +10,39 @@
             display: flex;
             align-items: center;
             gap: 1em; /* 控制按钮之间的距离 */
+            flex-wrap: wrap; /* 移动设备自动换行 */
         }
         .status {
             font-weight: bold;
-            margin-left: 1em; /* 状态栏距离按钮组 */
+            margin-left: 1em;
         }
         .copyright {
             font-size: 0.8em;
             color: lightgray;
             margin-top: 0.5em;
         }
+        /* 设置不同设备的布局 */
+        @media (max-width: 600px) {
+            /* 移动设备的样式 */
+            h2 {
+                font-size: 1.2em;
+            }
+            .status {
+                font-size: 0.9em;
+            }
+            button {
+                font-size: 1em;
+                padding: 0.5em 1em;
+            }
+            #dialogue-container {
+                font-size: 0.9em;
+            }
+        }
     </style>
 </head>
 <body>
-    <h2>即時語音轉錄與翻譯</div>
-    <div class="copyright">AlbertWu@版權所有，未經授權不得使用。</h1>
-</div>
+    <h2>即時語音轉錄與翻譯</h2>
+    <div class="copyright">AlbertWu@版權所有，未經授權不得使用。</div>
     <div class="button-group">
         <button onclick="requestAuthorization()">開始語音轉錄</button>
         <button onclick="stopRecognition()">停止語音轉錄</button>
