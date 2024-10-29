@@ -2,37 +2,37 @@
 <html lang="zh-Hant">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0"> <!-- 适配移动设备 -->
     <title>即時語音轉錄與翻譯</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1"> <!-- 添加视口设置，适应移动设备宽度 -->
     <script src="https://cdn.jsdelivr.net/npm/microsoft-cognitiveservices-speech-sdk@1.20.0/distrib/browser/microsoft.cognitiveservices.speech.sdk.bundle.js"></script>
     <style>
         .button-group {
             display: flex;
             align-items: center;
             gap: 1em; /* 控制按钮之间的距离 */
-            flex-wrap: wrap; /* 移动设备自动换行 */
+            flex-wrap: wrap; /* 在较小屏幕上换行 */
         }
         .status {
             font-weight: bold;
-            margin-left: 1em;
+            margin-left: 1em; /* 状态栏距离按钮组 */
         }
         .copyright {
             font-size: 0.8em;
             color: lightgray;
             margin-top: 0.5em;
         }
-        /* 设置不同设备的布局 */
+        /* 响应式样式：当宽度小于600px时，调整布局 */
         @media (max-width: 600px) {
-            /* 移动设备的样式 */
-            h2 {
-                font-size: 1.2em;
+            .button-group {
+                flex-direction: column; /* 在小屏幕上垂直排列按钮 */
+                gap: 0.5em;
             }
             .status {
+                margin-left: 0; /* 移除小屏幕下的间距 */
                 font-size: 0.9em;
             }
-            button {
-                font-size: 1em;
-                padding: 0.5em 1em;
+            h2 {
+                font-size: 1.2em;
             }
             #dialogue-container {
                 font-size: 0.9em;
