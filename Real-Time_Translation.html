@@ -36,6 +36,7 @@
             padding: 10px;
             box-sizing: border-box;
         }
+        /* 响应式样式 */
         @media (max-width: 600px) {
             .button-group {
                 flex-direction: column;
@@ -76,7 +77,6 @@
         let recognizer = null;  
         let inactivityTimer = null;  
         let wakeLock = null; 
-        let currentRecognitionLanguage = "en-US"; // 默认识别语言
 
         async function requestWakeLock() {
             try {
@@ -137,13 +137,13 @@
                 if (screen.orientation && screen.orientation.lock) {
                     screen.orientation.lock('portrait').catch(err => console.error("屏幕锁定失败:", err));
                 }
-                requestWakeLock();
+                requestWakeLock(); // 请求屏幕保持唤醒
             }
 
             try {
                 const speechConfig = SpeechSDK.SpeechTranslationConfig.fromSubscription(subscriptionKey, serviceRegion);
-                speechConfig.speechRecognitionLanguage = currentRecognitionLanguage;
-                speechConfig.addTargetLanguage(currentRecognitionLanguage === "en-US" ? "zh-Hant" : "en-US");
+                speechConfig.speechRecognitionLanguage = "en-US";
+                speechConfig.addTargetLanguage("zh-Hant");
 
                 const audioStream = await navigator.mediaDevices.getUserMedia({
                     audio: {
@@ -154,13 +154,14 @@
                         autoGainControl: false
                     }
                 });
-                
+
                 const audioConfig = SpeechSDK.AudioConfig.fromStreamInput(audioStream);
                 recognizer = new SpeechSDK.TranslationRecognizer(speechConfig, audioConfig);
 
                 recognizer.recognizing = (s, e) => {
                     const recognizedText = e.result.text;
-                    const translatedText = e.result.translations.get(currentRecognitionLanguage === "en-US" ? "zh-Hant" : "en-US");
+                    const isEnglish = /[a-zA-Z]/.test(recognizedText);
+                    const translatedText = isEnglish ? e.result.translations.get("zh-Hant") : recognizedText;
 
                     if (recognizedText !== lastRecognizedText) {
                         currentDialogue = recognizedText;
@@ -184,16 +185,15 @@
 
                 recognizer.recognized = (s, e) => {
                     if (e.result.reason === SpeechSDK.ResultReason.TranslatedSpeech) {
-                        const fullSentence = `原文: ${e.result.text}\n翻譯: ${e.result.translations.get(currentRecognitionLanguage === "en-US" ? "zh-Hant" : "en-US")}`;
+                        const recognizedText = e.result.text;
+                        const isEnglish = /[a-zA-Z]/.test(recognizedText);
+                        const translatedText = isEnglish ? e.result.translations.get("zh-Hant") : recognizedText;
+
+                        const fullSentence = `原文: ${recognizedText}\n翻譯: ${translatedText}`;
                         dialogues.push(fullSentence);
                         currentDialogue = "";
                         currentTranslation = "";
                         lastRecognizedText = "";
-
-                        // 自动切换语言以交替识别
-                        currentRecognitionLanguage = currentRecognitionLanguage === "en-US" ? "zh-Hant" : "en-US";
-                        stopRecognition(); // 停止当前识别
-                        startRecognition(); // 启动新的语言识别
                         updateDisplay();
                     }
                 };
@@ -231,7 +231,7 @@
             }
             updateStatus("停止轉錄");
             clearInactivityTimer();
-            releaseWakeLock();
+            releaseWakeLock(); // 释放屏幕保持唤醒
         }
 
         function resetInactivityTimer() {
