@@ -21,6 +21,12 @@
             color: lightgray;
             margin-top: 0.5em;
         }
+        #dialogue-container {
+            white-space: pre-wrap;
+            margin-top: 1em;
+            max-height: 400px; /* 设置最大高度 */
+            overflow-y: scroll; /* 显示垂直滚动条 */
+        }
         /* 响应式样式：当宽度小于600px时，调整布局 */
         @media (max-width: 600px) {
             .button-group {
@@ -48,7 +54,7 @@
         <button onclick="stopRecognition()">停止語音轉錄</button>
         <span class="status" id="status">狀態: 未開始</span>
     </div>
-    <div id="dialogue-container" style="white-space: pre-wrap; margin-top: 1em;"></div>
+    <div id="dialogue-container"></div>
 
     <script>
         const subscriptionKey = "1db722324ce2441092530e595f48c5a1";
@@ -66,6 +72,9 @@
             const dialogueContainer = document.getElementById("dialogue-container");
             dialogueContainer.innerText = dialogues.join("\n\n") + "\n\n" +
                 (currentDialogue ? `轉錄中: ${currentDialogue}\n翻譯中: ${currentTranslation}` : "");
+            
+            // 自动滚动到内容底部
+            dialogueContainer.scrollTop = dialogueContainer.scrollHeight;
         }
 
         function updateStatus(message) {
@@ -89,6 +98,13 @@
             }
 
             updateStatus("開始轉錄");
+            
+            // 检测是否为移动设备，并锁定屏幕方向
+            if (/Mobi|Android/i.test(navigator.userAgent)) {
+                if (screen.orientation && screen.orientation.lock) {
+                    screen.orientation.lock('portrait').catch(err => console.error("屏幕锁定失败:", err));
+                }
+            }
             
             try {
                 const speechConfig = SpeechSDK.SpeechTranslationConfig.fromSubscription(subscriptionKey, serviceRegion);
