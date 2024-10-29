@@ -3,51 +3,112 @@
 <head>
     <meta charset="UTF-8">
     <title>即時語音轉錄與翻譯</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <script src="https://cdn.jsdelivr.net/npm/microsoft-cognitiveservices-speech-sdk@1.20.0/distrib/browser/microsoft.cognitiveservices.speech.sdk.bundle.js"></script>
     <style>
+        html, body {
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            font-family: Arial, sans-serif;
+        }
         .button-group {
             display: flex;
             align-items: center;
-            gap: 1em; /* 控制按钮之间的距离 */
+            gap: 1em;
+            flex-wrap: wrap;
         }
         .status {
             font-weight: bold;
-            margin-left: 1em; /* 状态栏距离按钮组 */
+            margin-left: 1em;
         }
         .copyright {
             font-size: 0.8em;
             color: lightgray;
             margin-top: 0.5em;
         }
+        #dialogue-container {
+            white-space: pre-wrap;
+            flex-grow: 1;
+            overflow-y: auto;
+            padding: 10px;
+            box-sizing: border-box;
+        }
+        @media (max-width: 600px) {
+            .button-group {
+                flex-direction: column;
+                gap: 0.5em;
+            }
+            .status {
+                margin-left: 0;
+                font-size: 0.9em;
+            }
+            h2 {
+                font-size: 1.2em;
+            }
+            #dialogue-container {
+                font-size: 0.9em;
+            }
+        }
     </style>
 </head>
 <body>
-    <h2>即時語音轉錄與翻譯</div>
-    <div class="copyright">AlbertWu@版權所有，未經授權不得使用。</h1>
-</div>
+    <h2>即時語音轉錄與翻譯</h2>
+    <div class="copyright">AlbertWu@版權所有，未經授權不得使用。</div>
     <div class="button-group">
         <button onclick="requestAuthorization()">開始語音轉錄</button>
         <button onclick="stopRecognition()">停止語音轉錄</button>
         <span class="status" id="status">狀態: 未開始</span>
     </div>
-    <div id="dialogue-container" style="white-space: pre-wrap; margin-top: 1em;"></div>
+    <div id="dialogue-container"></div>
 
     <script>
         const subscriptionKey = "1db722324ce2441092530e595f48c5a1";
         const serviceRegion = "southeastasia";
         const requiredAuthCode = "sgs"; 
-        
-        let dialogues = [];  // 存储完整历史段落
-        let currentDialogue = "";  // 正在更新的当前句子
-        let currentTranslation = ""; // 正在更新的翻譯句子
-        let lastRecognizedText = "";  // 上一次实时更新的文本
-        let recognizer = null;  // 识别器对象
-        let inactivityTimer = null;  // 不活动计时器
+
+        let dialogues = []; 
+        let currentDialogue = "";  
+        let currentTranslation = ""; 
+        let lastRecognizedText = "";  
+        let recognizer = null;  
+        let inactivityTimer = null;  
+        let wakeLock = null; 
+        let currentRecognitionLanguage = "en-US"; // 默认识别语言
+
+        async function requestWakeLock() {
+            try {
+                if ('wakeLock' in navigator) {
+                    wakeLock = await navigator.wakeLock.request('screen');
+                    console.log("Screen Wake Lock acquired");
+                    wakeLock.addEventListener('release', () => {
+                        console.log('Screen Wake Lock released');
+                    });
+                }
+            } catch (err) {
+                console.error(`Wake Lock error: ${err.name}, ${err.message}`);
+            }
+        }
+
+        function releaseWakeLock() {
+            if (wakeLock) {
+                wakeLock.release().then(() => {
+                    wakeLock = null;
+                    console.log("Screen Wake Lock released");
+                });
+            }
+        }
 
         function updateDisplay() {
             const dialogueContainer = document.getElementById("dialogue-container");
-            dialogueContainer.innerText = dialogues.join("\n\n") + "\n\n" +
-                (currentDialogue ? `轉錄中: ${currentDialogue}\n翻譯中: ${currentTranslation}` : "");
+            dialogueContainer.innerHTML = dialogues.map(dialogue => {
+                const [originalText, translatedText] = dialogue.split("\n翻譯: ");
+                return `${originalText}<br><span style="color: orange; font-weight: bold;">翻譯: ${translatedText}</span>`;
+            }).join("<br><br>") + "<br><br>" +
+                (currentDialogue ? `轉錄中: ${currentDialogue}<br><span style="color: orange; font-weight: bold;">翻譯中: ${currentTranslation}</span>` : "");
+            dialogueContainer.scrollTop = dialogueContainer.scrollHeight;
         }
 
         function updateStatus(message) {
@@ -64,35 +125,50 @@
             }
         }
 
-        function startRecognition() {
+        async function startRecognition() {
             if (!subscriptionKey || !serviceRegion) {
                 alert("請提供有效的 API 金鑰和區域。");
                 return;
             }
 
             updateStatus("開始轉錄");
-            
+
+            if (/Mobi|Android/i.test(navigator.userAgent)) {
+                if (screen.orientation && screen.orientation.lock) {
+                    screen.orientation.lock('portrait').catch(err => console.error("屏幕锁定失败:", err));
+                }
+                requestWakeLock();
+            }
+
             try {
                 const speechConfig = SpeechSDK.SpeechTranslationConfig.fromSubscription(subscriptionKey, serviceRegion);
-                speechConfig.speechRecognitionLanguage = "en-US";
-                speechConfig.addTargetLanguage("zh-Hant");
+                speechConfig.speechRecognitionLanguage = currentRecognitionLanguage;
+                speechConfig.addTargetLanguage(currentRecognitionLanguage === "en-US" ? "zh-Hant" : "en-US");
 
-                const audioConfig = SpeechSDK.AudioConfig.fromDefaultMicrophoneInput();
+                const audioStream = await navigator.mediaDevices.getUserMedia({
+                    audio: {
+                        sampleRate: 48000,
+                        sampleSize: 16,
+                        echoCancellation: false,
+                        noiseSuppression: false,
+                        autoGainControl: false
+                    }
+                });
+                
+                const audioConfig = SpeechSDK.AudioConfig.fromStreamInput(audioStream);
                 recognizer = new SpeechSDK.TranslationRecognizer(speechConfig, audioConfig);
 
                 recognizer.recognizing = (s, e) => {
                     const recognizedText = e.result.text;
-                    const translatedText = e.result.translations.get("zh-Hant");
+                    const translatedText = e.result.translations.get(currentRecognitionLanguage === "en-US" ? "zh-Hant" : "en-US");
 
                     if (recognizedText !== lastRecognizedText) {
                         currentDialogue = recognizedText;
                         currentTranslation = translatedText;
                         lastRecognizedText = recognizedText;
                         updateDisplay();
-
-                        // 重置不活动计时器
                         resetInactivityTimer();
-                        
+
                         if (recognizedText.endsWith(".") || recognizedText.endsWith("?") ||
                             translatedText.endsWith("。") || translatedText.endsWith("？")) {
                             
@@ -108,11 +184,16 @@
 
                 recognizer.recognized = (s, e) => {
                     if (e.result.reason === SpeechSDK.ResultReason.TranslatedSpeech) {
-                        const fullSentence = `原文: ${e.result.text}\n翻譯: ${e.result.translations.get("zh-Hant")}`;
+                        const fullSentence = `原文: ${e.result.text}\n翻譯: ${e.result.translations.get(currentRecognitionLanguage === "en-US" ? "zh-Hant" : "en-US")}`;
                         dialogues.push(fullSentence);
                         currentDialogue = "";
                         currentTranslation = "";
                         lastRecognizedText = "";
+
+                        // 自动切换语言以交替识别
+                        currentRecognitionLanguage = currentRecognitionLanguage === "en-US" ? "zh-Hant" : "en-US";
+                        stopRecognition(); // 停止当前识别
+                        startRecognition(); // 启动新的语言识别
                         updateDisplay();
                     }
                 };
@@ -133,7 +214,6 @@
                     err => console.error("Error starting recognition:", err)
                 );
 
-                // 启动不活动计时器
                 resetInactivityTimer();
 
             } catch (error) {
@@ -149,9 +229,9 @@
                 );
                 recognizer = null;
             }
-
             updateStatus("停止轉錄");
-            clearInactivityTimer(); // 停止不活动计时器
+            clearInactivityTimer();
+            releaseWakeLock();
         }
 
         function resetInactivityTimer() {
@@ -159,7 +239,7 @@
             inactivityTimer = setTimeout(() => {
                 alert("超過2分鐘無語音檢測，停止轉錄。");
                 stopRecognition();
-            }, 2 * 60 * 1000); // 2分鐘
+            }, 2 * 60 * 1000);
         }
 
         function clearInactivityTimer() {
