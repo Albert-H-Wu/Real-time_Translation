@@ -6,51 +6,16 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <script src="https://cdn.jsdelivr.net/npm/microsoft-cognitiveservices-speech-sdk@1.20.0/distrib/browser/microsoft.cognitiveservices.speech.sdk.bundle.js"></script>
     <style>
-        html, body {
-            height: 100%;
-            margin: 0;
-            padding: 0;
-            display: flex;
-            flex-direction: column;
-            font-family: Arial, sans-serif;
-        }
-        .button-group {
-            display: flex;
-            align-items: center;
-            gap: 1em;
-            flex-wrap: wrap;
-        }
-        .status {
-            font-weight: bold;
-            margin-left: 1em;
-        }
-        .copyright {
-            font-size: 0.8em;
-            color: lightgray;
-            margin-top: 0.5em;
-        }
-        #dialogue-container {
-            white-space: pre-wrap;
-            flex-grow: 1;
-            overflow-y: auto;
-            padding: 10px;
-            box-sizing: border-box;
-        }
+        html, body { height: 100%; margin: 0; padding: 0; display: flex; flex-direction: column; font-family: Arial, sans-serif; }
+        .button-group { display: flex; align-items: center; gap: 1em; flex-wrap: wrap; }
+        .status { font-weight: bold; margin-left: 1em; }
+        .copyright { font-size: 0.8em; color: lightgray; margin-top: 0.5em; }
+        #dialogue-container { white-space: pre-wrap; flex-grow: 1; overflow-y: auto; padding: 10px; box-sizing: border-box; }
         @media (max-width: 600px) {
-            .button-group {
-                flex-direction: column;
-                gap: 0.5em;
-            }
-            .status {
-                margin-left: 0;
-                font-size: 0.9em;
-            }
-            h2 {
-                font-size: 1.2em;
-            }
-            #dialogue-container {
-                font-size: 0.9em;
-            }
+            .button-group { flex-direction: column; gap: 0.5em; }
+            .status { margin-left: 0; font-size: 0.9em; }
+            h2 { font-size: 1.2em; }
+            #dialogue-container { font-size: 0.9em; }
         }
     </style>
 </head>
@@ -69,22 +34,20 @@
         const serviceRegion = "southeastasia";
         const requiredAuthCode = "sgs"; 
 
-        let dialogues = []; 
+        let dialogues = [];
         let currentDialogue = "";  
         let currentTranslation = ""; 
         let lastRecognizedText = "";  
         let recognizer = null;  
         let inactivityTimer = null;  
         let wakeLock = null; 
+        let recognitionLanguage = "en-US"; // 初始语言为 en-US
 
         async function requestWakeLock() {
             try {
                 if ('wakeLock' in navigator) {
                     wakeLock = await navigator.wakeLock.request('screen');
-                    console.log("Screen Wake Lock acquired");
-                    wakeLock.addEventListener('release', () => {
-                        console.log('Screen Wake Lock released');
-                    });
+                    wakeLock.addEventListener('release', () => console.log('Screen Wake Lock released'));
                 }
             } catch (err) {
                 console.error(`Wake Lock error: ${err.name}, ${err.message}`);
@@ -93,10 +56,7 @@
 
         function releaseWakeLock() {
             if (wakeLock) {
-                wakeLock.release().then(() => {
-                    wakeLock = null;
-                    console.log("Screen Wake Lock released");
-                });
+                wakeLock.release().then(() => wakeLock = null);
             }
         }
 
@@ -139,91 +99,79 @@
                 requestWakeLock();
             }
 
-            try {
-                const speechConfig = SpeechSDK.SpeechTranslationConfig.fromSubscription(subscriptionKey, serviceRegion);
+            // 设置识别和翻译语言
+            setupRecognizer(recognitionLanguage);
 
-                // 初始化语言
-                speechConfig.speechRecognitionLanguage = "zh-Hant";
-                speechConfig.addTargetLanguage("en-US");
+            resetInactivityTimer();
+        }
 
-                const audioStream = await navigator.mediaDevices.getUserMedia({
-                    audio: {
-                        sampleRate: 48000,
-                        sampleSize: 16,
-                        echoCancellation: false,
-                        noiseSuppression: false,
-                        autoGainControl: false
-                    }
-                });
-                
-                const audioConfig = SpeechSDK.AudioConfig.fromStreamInput(audioStream);
-                recognizer = new SpeechSDK.TranslationRecognizer(speechConfig, audioConfig);
+        function setupRecognizer(language) {
+            if (recognizer) {
+                recognizer.close();
+                recognizer = null;
+            }
 
-                recognizer.recognizing = (s, e) => {
-                    const recognizedText = e.result.text;
-                    const translatedText = e.result.translations.get(speechConfig.targetLanguages[0]);
+            const speechConfig = SpeechSDK.SpeechTranslationConfig.fromSubscription(subscriptionKey, serviceRegion);
+            speechConfig.speechRecognitionLanguage = language;
+            speechConfig.addTargetLanguage(language === "en-US" ? "zh-Hant" : "en-US");
 
-                    if (recognizedText !== lastRecognizedText) {
-                        currentDialogue = recognizedText;
-                        currentTranslation = translatedText;
-                        lastRecognizedText = recognizedText;
-                        updateDisplay();
-                        resetInactivityTimer();
+            const audioConfig = SpeechSDK.AudioConfig.fromDefaultMicrophoneInput();
+            recognizer = new SpeechSDK.TranslationRecognizer(speechConfig, audioConfig);
+
+            recognizer.recognizing = (s, e) => {
+                const recognizedText = e.result.text;
+                const translatedText = e.result.translations.get(speechConfig.targetLanguages[0]);
+
+                if (recognizedText !== lastRecognizedText) {
+                    currentDialogue = recognizedText;
+                    currentTranslation = translatedText;
+                    lastRecognizedText = recognizedText;
+                    updateDisplay();
+                    resetInactivityTimer();
+                    
+                    if (recognizedText.endsWith(".") || recognizedText.endsWith("?") ||
+                        translatedText.endsWith("。") || translatedText.endsWith("？")) {
                         
-                        if (recognizedText.endsWith(".") || recognizedText.endsWith("?") ||
-                            translatedText.endsWith("。") || translatedText.endsWith("？")) {
-                            
-                            const fullSentence = `原文: ${recognizedText}\n翻譯: ${translatedText}`;
-                            dialogues.push(fullSentence);
-                            currentDialogue = "";
-                            currentTranslation = "";
-                            lastRecognizedText = "";
-                            updateDisplay();
-                        }
-                    }
-                };
-
-                recognizer.recognized = (s, e) => {
-                    if (e.result.reason === SpeechSDK.ResultReason.TranslatedSpeech) {
-                        const fullSentence = `原文: ${e.result.text}\n翻譯: ${e.result.translations.get(speechConfig.targetLanguages[0])}`;
+                        const fullSentence = `原文: ${recognizedText}\n翻譯: ${translatedText}`;
                         dialogues.push(fullSentence);
                         currentDialogue = "";
                         currentTranslation = "";
                         lastRecognizedText = "";
                         updateDisplay();
-
-                        // 动态调整识别语言和目标语言
-                        if (speechConfig.speechRecognitionLanguage === "en-US") {
-                            speechConfig.speechRecognitionLanguage = "zh-Hant";
-                            speechConfig.targetLanguages = ["en-US"];
-                        } else {
-                            speechConfig.speechRecognitionLanguage = "en-US";
-                            speechConfig.targetLanguages = ["zh-Hant"];
-                        }
                     }
-                };
+                }
+            };
 
-                recognizer.canceled = (s, e) => {
-                    console.error(`Canceled: Reason=${e.reason} ErrorDetails=${e.errorDetails}`);
-                    alert(`語音轉錄取消，原因：${e.errorDetails}`);
-                    stopRecognition();
-                };
+            recognizer.recognized = (s, e) => {
+                if (e.result.reason === SpeechSDK.ResultReason.TranslatedSpeech) {
+                    const fullSentence = `原文: ${e.result.text}\n翻譯: ${e.result.translations.get(speechConfig.targetLanguages[0])}`;
+                    dialogues.push(fullSentence);
+                    currentDialogue = "";
+                    currentTranslation = "";
+                    lastRecognizedText = "";
+                    updateDisplay();
 
-                recognizer.sessionStopped = (s, e) => {
-                    console.log("Session stopped.");
-                    stopRecognition();
-                };
+                    // 切换语言
+                    recognitionLanguage = recognitionLanguage === "en-US" ? "zh-Hant" : "en-US";
+                    setupRecognizer(recognitionLanguage); // 重新设置识别器
+                }
+            };
 
-                recognizer.startContinuousRecognitionAsync(
-                    () => console.log("Recognition started"),
-                    err => console.error("Error starting recognition:", err)
-                );
+            recognizer.canceled = (s, e) => {
+                console.error(`Canceled: Reason=${e.reason} ErrorDetails=${e.errorDetails}`);
+                alert(`語音轉錄取消，原因：${e.errorDetails}`);
+                stopRecognition();
+            };
 
-                resetInactivityTimer();
+            recognizer.sessionStopped = (s, e) => {
+                console.log("Session stopped.");
+                stopRecognition();
+            };
 
-            } catch (error) {
-                console.error("Error initializing recognition:", error);
-            }
+            recognizer.startContinuousRecognitionAsync(
+                () => console.log("Recognition started"),
+                err => console.error("Error starting recognition:", err)
+            );
         }
 
         function stopRecognition() {
