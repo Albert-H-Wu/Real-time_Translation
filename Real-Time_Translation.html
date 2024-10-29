@@ -31,6 +31,276 @@
         }
         #dialogue-container {
             white-space: pre-wrap;
+            flex-grow: 1; /* 占满屏幕剩余空间 */
+            overflow-y: auto;
+            padding: 10px;
+            box-sizing: border-box;
+        }
+        /* 响应式样式 */
+        @media (max-width: 600px) {
+            .button-group {
+                flex-direction: column;
+                gap: 0.5em;
+            }
+            .status {
+                margin-left: 0;
+                font-size: 0.9em;
+            }
+            h2 {
+                font-size: 1.2em;
+            }
+            #dialogue-container {
+                font-size: 0.9em;
+            }
+        }
+    </style>
+</head>
+<body>
+    <h2>即時語音轉錄與翻譯</h2>
+    <div class="copyright">AlbertWu@版權所有，未經授權不得使用。</div>
+    <div class="button-group">
+        <button onclick="requestAuthorization()">開始語音轉錄</button>
+        <button onclick="stopRecognition()">停止語音轉錄</button>
+        <span class="status" id="status">狀態: 未開始</span>
+    </div>
+    <div id="dialogue-container"></div>
+
+    <script>
+        const subscriptionKey = "1db722324ce2441092530e595f48c5a1";
+        const serviceRegion = "southeastasia";
+        const requiredAuthCode = "sgs"; 
+
+        let dialogues = []; 
+        let currentDialogue = "";  
+        let currentTranslation = ""; 
+        let lastRecognizedText = "";  
+        let recognizer = null;  
+        let inactivityTimer = null;  
+        let wakeLock = null; 
+
+        async function requestWakeLock() {
+            try {
+                if ('wakeLock' in navigator) {
+                    wakeLock = await navigator.wakeLock.request('screen');
+                    console.log("Screen Wake Lock acquired");
+                    wakeLock.addEventListener('release', () => {
+                        console.log('Screen Wake Lock released');
+                    });
+                }
+            } catch (err) {
+                console.error(Wake Lock error: ${err.name}, ${err.message});
+            }
+        }
+
+        function releaseWakeLock() {
+            if (wakeLock) {
+                wakeLock.release().then(() => {
+                    wakeLock = null;
+                    console.log("Screen Wake Lock released");
+                });
+            }
+        }
+
+        function updateDisplay() {
+            const dialogueContainer = document.getElementById("dialogue-container");
+            dialogueContainer.innerHTML = dialogues.map(dialogue => {
+                const [originalText, translatedText] = dialogue.split("\n翻譯: ");
+                return ${originalText}<br><span style="color: orange; font-weight: bold;">翻譯: ${translatedText}</span>;
+            }).join("<br><br>") + "<br><br>" +
+                (currentDialogue ? 轉錄中: ${currentDialogue}<br><span style="color: orange; font-weight: bold;">翻譯中: ${currentTranslation}</span> : "");
+            dialogueContainer.scrollTop = dialogueContainer.scrollHeight;
+        }
+
+        function updateStatus(message) {
+            document.getElementById("status").innerText = 狀態: ${message};
+        }
+
+        function requestAuthorization() {
+            const userAuthCode = prompt("請輸入授權碼以開始語音轉錄：");
+            if (userAuthCode === requiredAuthCode) {
+                startRecognition();
+            } else {
+                alert("授權碼錯誤，無法開始轉錄。");
+                updateStatus("授權失敗");
+            }
+        }
+
+        async function startRecognition() {
+            if (!subscriptionKey || !serviceRegion) {
+                alert("請提供有效的 API 金鑰和區域。");
+                return;
+            }
+
+            updateStatus("開始轉錄");
+
+            if (/Mobi|Android/i.test(navigator.userAgent)) {
+                if (screen.orientation && screen.orientation.lock) {
+                    screen.orientation.lock('portrait').catch(err => console.error("屏幕锁定失败:", err));
+                }
+                requestWakeLock(); // 请求屏幕保持唤醒
+            }
+
+            try {
+                const speechConfig = SpeechSDK.SpeechTranslationConfig.fromSubscription(subscriptionKey, serviceRegion);
+                speechConfig.speechRecognitionLanguage = "en-US";
+                speechConfig.addTargetLanguage("zh-Hant");
+
+                const audioStream = await navigator.mediaDevices.getUserMedia({
+                    audio: {
+                        sampleRate: 48000, // 提高采样率
+                        sampleSize: 16,    // 提高采样大小
+                        echoCancellation: false,
+                        noiseSuppression: false,
+                        autoGainControl: false
+                    }
+                });
+                
+                const audioConfig = SpeechSDK.AudioConfig.fromStreamInput(audioStream);
+                recognizer = new SpeechSDK.TranslationRecognizer(speechConfig, audioConfig);
+
+                recognizer.recognizing = (s, e) => {
+                    const recognizedText = e.result.text;
+                    const translatedText = e.result.translations.get("zh-Hant");
+
+                    if (recognizedText !== lastRecognizedText) {
+                        currentDialogue = recognizedText;
+                        currentTranslation = translatedText;
+                        lastRecognizedText = recognizedText;
+                        updateDisplay();
+                        resetInactivityTimer();
+                        
+                        if (recognizedText.endsWith(".") || recognizedText.endsWith("?") ||
+                            translatedText.endsWith("。") || translatedText.endsWith("？")) {
+                            
+                            const fullSentence = 原文: ${recognizedText}\n翻譯: ${translatedText};
+                            dialogues.push(fullSentence);
+                            currentDialogue = "";
+                            currentTranslation = "";
+                            lastRecognizedText = "";
+                            updateDisplay();
+                        }
+                    }
+                };
+
+                recognizer.recognized = (s, e) => {
+                    if (e.result.reason === SpeechSDK.ResultReason.TranslatedSpeech) {
+                        const fullSentence = 原文: ${e.result.text}\n翻譯: ${e.result.translations.get("zh-Hant")};
+                        dialogues.push(fullSentence);
+                        currentDialogue = "";
+                        currentTranslation = "";
+                        lastRecognizedText = "";
+                        updateDisplay();
+                    }
+                };
+
+                recognizer.canceled = (s, e) => {
+                    console.error(Canceled: Reason=${e.reason} ErrorDetails=${e.errorDetails});
+                    alert(語音轉錄取消，原因：${e.errorDetails});
+                    stopRecognition();
+                };
+
+                recognizer.sessionStopped = (s, e) => {
+                    console.log("Session stopped.");
+                    stopRecognition();
+                };
+
+                recognizer.startContinuousRecognitionAsync(
+                    () => console.log("Recognition started"),
+                    err => console.error("Error starting recognition:", err)
+                );
+
+                resetInactivityTimer();
+
+            } catch (error) {
+                console.error("Error initializing recognition:", error);
+            }
+        }
+
+        function stopRecognition() {
+            if (recognizer) {
+                recognizer.stopContinuousRecognitionAsync(
+                    () => console.log("Recognition stopped"),
+                    err => console.error("Error stopping recognition:", err)
+                );
+                recognizer = null;
+            }
+            updateStatus("停止轉錄");
+            clearInactivityTimer();
+            releaseWakeLock(); // 释放屏幕保持唤醒
+        }
+
+        function resetInactivityTimer() {
+            clearInactivityTimer();
+            inactivityTimer = setTimeout(() => {
+                alert("超過2分鐘無語音檢測，停止轉錄。");
+                stopRecognition();
+            }, 2 * 60 * 1000);
+        }
+
+        function clearInactivityTimer() {
+            if (inactivityTimer) {
+                clearTimeout(inactivityTimer);
+                inactivityTimer = null;
+            }
+        }
+    </script>
+</body>
+</html>
+
+ChatGPT 說：
+ChatGPT
+非常高兴听到该脚本已经完全满足您的需求！如果您今后有新的功能需求或进一步的优化想法，随时告诉我，我将乐于协助您进行相关的调整和改进。祝您项目顺利！
+
+
+
+
+你說：
+請自動交叉識別en-US及zh-Hant。
+目前為識別en-US翻譯成zh-Hant，當識別為zh-Hant時，直接轉出zh-Hant語音轉文字
+
+3/3
+
+ChatGPT 說：
+ChatGPT
+要实现自动识别 en-US 和 zh-Hant 这两种语言，并根据识别的语言输出对应的文本翻译或直接显示识别的中文内容，可以在脚本中利用 Microsoft Cognitive Services 的 SpeechRecognizer 功能，对两种语言分别进行检测。
+
+以下是调整后的代码：
+
+html
+複製程式碼
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <title>即時語音轉錄與翻譯</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <script src="https://cdn.jsdelivr.net/npm/microsoft-cognitiveservices-speech-sdk@1.20.0/distrib/browser/microsoft.cognitiveservices.speech.sdk.bundle.js"></script>
+    <style>
+        html, body {
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            font-family: Arial, sans-serif;
+        }
+        .button-group {
+            display: flex;
+            align-items: center;
+            gap: 1em;
+            flex-wrap: wrap;
+        }
+        .status {
+            font-weight: bold;
+            margin-left: 1em;
+        }
+        .copyright {
+            font-size: 0.8em;
+            color: lightgray;
+            margin-top: 0.5em;
+        }
+        #dialogue-container {
+            white-space: pre-wrap;
             flex-grow: 1;
             overflow-y: auto;
             padding: 10px;
@@ -251,3 +521,11 @@
     </script>
 </body>
 </html>
+主要改动点
+语言检测：在 recognizing 和 recognized 事件中加入正则表达式检测 recognizedText 是否包含英文字母，以此判断输入是否为英文。
+如果是英文，则将翻译内容 (translatedText) 设为中文翻译；
+
+
+
+
+
